@@ -28,7 +28,7 @@ class TrackingTrial:
                 video_dirs.append(full_path)
 
         video_path = random.choice(video_dirs)
-        # video_path = ".\\OTB100\\Lemming"  # 适应性调整
+        video_path = ".\\OTB100\\Lemming"  # 适应性调整
         print(video_path)
 
         seq_path = os.path.join(video_path, "img/%04d.jpg")
@@ -148,6 +148,7 @@ class TrackingTrial:
                     roi = rects[0]
                     tracker.init(frame, roi)
                     status = 1  # 更改为跟踪状态
+                    bbox = roi
                 else:
                     # TODO 手动交互式选择方框
                     # 按键则开始选择初始方框并初始化，否则一直循环展示图像并等待按键
@@ -193,4 +194,5 @@ if __name__ == "__main__":
     # cap = p.read_camera()
     cap, rects = p.read_seq()
     # p.show_ground_truth(cap, rects)
-    p.track_object(cap, rects, True)
+    # p.track_object(cap, rects, True)  # opencv方法
+    p.track_object(cap, rects)

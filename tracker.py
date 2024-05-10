@@ -25,13 +25,15 @@ class Tracker:
         self.max_patch_size = 256
 
         #
+        self.response_threshold = -1  # TODO
+        # 下列参数来自源代码https://github.com/scott89/KCF/blob/master/run_tracker.m
         self.padding = 2.5  # 扩大ROI的倍数，帮助模型获取目标周围环境信息
-        self.sigma = 0  # FIXME
-        self.lambda_ = 0  #
-        self.sigma_factor = 0.1  # 相对于目标大小的回归目标的空间带宽,论文代码给出为0.1
-        self.interp_factor = 0.02  # 更新率，更新alpha和x的速度，论文代码给出为0.02
+        self.kernel_sigma = 0.5  # 默认 0.5
+        self.kernel_lambda_ = 1e-4  # 正则化参数 默认1e-4
+        self.sigma_factor = 0.1  # 相对于目标大小的回归目标的空间带宽 默认0.1
+        self.interp_factor = 0.02  # 更新率，更新alpha和x的速度 默认0.02
 
-        #
+        # 不可调整参数
         self.roi = None  # 存储的是未经缩放的roi
         self._hog_win_size = None  # 存储缩放为 maxpatchsize 的 窗口大小，提取特征的大小
         pass
@@ -61,10 +63,10 @@ class Tracker:
         x, uroi = self._gen_feature(frame, roi)  # 返回形状 36,feat_h,feat_w
 
         # 5. 使用二维高斯函数生成训练标签矩阵y
-        y = self._gen_label(x.shape[2], x.shape[1])  # 二三维是特征维度
+        y = self._gen_label(x.shape[1:])  # y 的形状为h,w
 
         # 6. 计算kxx  训练非线性回归器得到alphah
-        self.alphaf = self._train(x, y, self.sigma, self.labmda_)
+        self.alphaf = self._train(x, y)
 
         self.roi = roi  # 模型当前的roi
         self.x = x  # 目标区域的特征图
@@ -78,7 +80,7 @@ class Tracker:
         ux, uy, uw, uh = uroi
 
         # 2.计算得到特征响应矩阵 返回形状为fh,fw
-        responses = self._detect(self.alphaf, self.x, z, self.sigma)
+        responses = self._detect(self.alphaf, self.x, z)
 
         # 3.找到最大响应值和对应的坐标，该坐标是新的roi的中心坐标
         # （设置阈值，如果小于阈值认为目标丢失重新查找）
@@ -95,8 +97,8 @@ class Tracker:
         # 通过插值法更新目标区域模板
         self.x = self.x * (1 - self.interp_factor) + z * self.interp_factor
         # 通过插值法更新模型
-        y = self._gen_label(x.shape[2], x.shape[1])
-        alphaf = self._train(z, y, self.sigma, self.lambda_)
+        y = self._gen_label(z.shape[1:])
+        alphaf = self._train(z, y)
         self.alphaf = (
             self.alphaf * (1 - self.interp_factor) + alphaf * self.interp_factor
         )
@@ -104,18 +106,28 @@ class Tracker:
         return success, self.roi
 
     def _gen_feature(self, image, roi):
-        # 计算目标区域的HOG特征
+        """计算目标区域的HOG特征
+
+        Args:
+            image (_type_): 需要检测的帧
+            roi (_type_): 目标区域ROI
+
+        Returns:
+            _type_: 特征矩阵 扩大后的ROI
+        """
         # 1. 计算2.5x扩大的ROI，用于获取目标环境信息
         x, y, w, h = roi
-        ux = (x - w / 2 * (self.padding - 1)) // 2 * 2
-        uy = (y - h / 2 * (self.padding - 1)) // 2 * 2
-        uw, uh = w * self.padding, h * self.padding
+        ux = int((x - w / 2 * (self.padding - 1)) // 2 * 2)
+        uy = int((y - h / 2 * (self.padding - 1)) // 2 * 2)
+        uw, uh = int(w * self.padding), int(h * self.padding)
 
-        # 2.裁剪出扩大后的ROI的子图片，并将这个图片resize到之前计算的hog win size，用于计算特征
-        patch = image[uy : uy + uh, ux : ux + uw, :]
+        # 2. 裁剪+resize
+        # 裁剪出2.5倍ROI的区域，并将这个图片resize到之前计算的hog win size，用于计算特征
+
+        patch = image[uy if uy > 0 else 0 : uy + uh, ux if ux > 0 else 0 : ux + uw, :]
         # patch = cv2.copyMakeBorder(patch)
         patch = cv2.resize(patch, self._hog_win_size)
-        # FIXME 如果在图像边缘截取到图片缺失，则resize可能会拉伸图片
+        # FIXME 如果在图像边缘截取到图片缺失，则resize可能会拉伸图片,这种情况很常见
 
         # 3. 计算特征，返回值为36,h,w 因为fft2默认计算最后两维
         feature = self.hog.compute(patch, self._hog_win_size, padding=(0, 0))
@@ -133,11 +145,20 @@ class Tracker:
         feature = feature * hann2d
         return feature, (ux, uy, uw, uh)  # 特征36,fh,fw  扩大后的roi
 
-    def _gen_label(self, w, h):
-        # 计算二维高斯作为特征标签
+    def _gen_label(self, shape):
+        """计算二维高斯作为特征标签
+
+        Args:
+            shape (tuple): (h,w) 高和宽，符合图像存储
+
+        Returns:
+            _type_: 形状为h,w的二维高斯标签矩阵
+        """
         # 1. 生成坐标矩阵，并纠正网格坐标的偏移
-        halfw, halfh = w / 2 - 0.5, h / 2 - 0.5
-        x, y = np.mgrid[-halfw : halfw + 0.5 : 1, -halfh : halfh + 0.5 : 1]  # 坐标矩阵
+        h, w = shape
+        halfh, halfw = h / 2 - 0.5, w / 2 - 0.5
+        y, x = np.mgrid[-halfh : halfh + 0.5 : 1, -halfw : halfw + 0.5 : 1]  # 坐标矩阵
+
         # 2. 得到用于计算二维高斯的sigma
         # 参考matlab源码得到计算sigma的公式
         # https://github.com/scott89/KCF/blob/master/gaussian_shaped_labels.m
@@ -146,33 +167,50 @@ class Tracker:
         g = 1 / (2 * np.pi * sigma**2) * np.exp(-(x**2 + y**2) / (2 * sigma**2))
         return g
 
-    def _train(self, x, y, sigma, lambda_):
+    def _train(self, x, y):
         """原论文的训练流程,返回核化岭回归的解alphaf
 
         Args:
-            x (_type_): 形状 c,feat_h,feat_w
-            y (_type_): w,h
+            x (_type_): 形状 c,fh,fw
+            y (_type_): fh,fw
 
         Returns:
             _type_: _description_
         """
         # TODO 实现DCF
         # TODO kernelsigma kernellambda_
-        k = self._rbf_kernel_correlation(x, x, sigma)
-        alphaf = np.fft.fft2(y) / (np.fft.fft2(k) + lambda_)
+        k = self._rbf_kernel_correlation(x, x)  # 形状为fh,fw
+        alphaf = np.fft.fft2(y) / (np.fft.fft2(k) + self.kernel_lambda_)
         return alphaf
 
-    def _rbf_kernel_correlation(self, x1, x2, sigma):
-        # 输入形状 c,fh，fw 或者fh,fw 至少有一个多通道的
-        # 径向基核相关函数，输入的多通道矩阵，比如转换为axis0为通道
+    def _rbf_kernel_correlation(self, x1, x2):
+        """rbf径向基核相关函数
+
+        Args:
+            x1 (_type_): 输入形状 c,fh，fw 或者fh,fw
+            x2 (_type_): 输入形状 c,fh，fw 或者fh,fw,至少有一个多通道的
+
+        Returns:
+            _type_: _description_
+        """
         c = np.fft.ifft2(np.sum(np.conj(np.fft.fft2(x1)) * np.fft.fft2(x2), axis=0))
         c = np.fft.fftshift(c)  # 将零频率分量设置为频谱中心
         d = np.sum(x1**2) + np.sum(x2**2) - 2 * c
-        k = np.exp(-1 / (sigma**2) * np.abs(d) / d.size)
+        k = np.exp(-1 / (self.kernel_sigma**2) * np.abs(d) / d.size)
         return k  # 形状fh,fw
 
-    def _detect(self, alphaf, x, z, sigma):
-        k = self._rbf_kernel_correlation(z, x, sigma)
+    def _detect(self, alphaf, x, z):
+        """检测区域，生成响应矩阵
+
+        Args:
+            alphaf (_type_): 模型岭回归的解
+            x (_type_): _description_
+            z (_type_): _description_
+
+        Returns:
+            _type_: 形状为fh,fw的特征响应矩阵
+        """
+        k = self._rbf_kernel_correlation(z, x)
         responses = np.real(np.fft.ifft2(alphaf * np.fft.fft2(k)))  # 逆变换后仍然是复数
         return responses  # 形状fh,fw
 
@@ -181,5 +219,3 @@ if __name__ == "__main__":
     t = Tracker()
     img = cv2.imread(".\\OTB100\\Basketball\\img\\0001.jpg")
     # img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    t._hog(img)
