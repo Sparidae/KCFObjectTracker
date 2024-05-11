@@ -1,3 +1,4 @@
+import argparse
 import os
 import random
 import re
@@ -13,8 +14,8 @@ GREEN = (0, 255, 0)
 
 
 class TrackingTrial:
-    def __init__(self) -> None:
-        self.interval = 5  # 等待时间间隔
+    def __init__(self, interval=10) -> None:
+        self.interval = interval  # 等待时间间隔
         self.gt = True  # 是否绘制groundtruth
         self.video_type = None  # ['seq','video','camera']
 
@@ -199,16 +200,43 @@ class TrackingTrial:
 
 
 if __name__ == "__main__":
-    p = TrackingTrial()
+    parser = argparse.ArgumentParser(description="Process command line arguments")
+    parser.add_argument(
+        "data_type",
+        choices=["seq", "video", "camera"],
+        help="Data type: seq, video, or camera",
+    )
+    parser.add_argument(
+        "optional_argument", nargs="?", default=None, help="Optional argument"
+    )
+
+    args = parser.parse_args()
+
+    p = TrackingTrial(interval=10)
+    if args.data_type == "seq":
+        print("Data type is sequence")
+
+        cap, rects = p.read_seq()
+        p.track_object(cap, rects)
+
+    elif args.data_type == "video":
+        if args.optional_argument is None:
+            print("Error: Video path is missing.")
+        print("Data type is video, Path:", args.optional_argument)
+
+        cap = p.read_video(video_path=args.optional_argument)
+        p.track_object(cap)
+
+    elif args.data_type == "camera":
+        device_id = (
+            int(args.optional_argument) if args.optional_argument is not None else 0
+        )
+        print("Data type is camera, Device ID:", device_id)
+
+        cap = p.read_camera()
+        p.track_object(cap)
+
     # cap = p.read_camera()
 
-    cap, rects = p.read_seq()
     # p.show_ground_truth(cap, rects)
     # p.track_object(cap, rects, True)  # opencv方法
-    p.track_object(cap, rects)
-
-    # cap = p.read_video(video_path="./dataset/car.avi")
-    # p.track_object(cap)
-
-    # cap = p.read_camera()
-    # p.track_object(cap)

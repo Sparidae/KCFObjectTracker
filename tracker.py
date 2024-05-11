@@ -18,15 +18,15 @@ class Tracker:
         # 将ROI放缩到这个大小再提取HOG特征
         self.max_patch_size = 256
 
-        #
-        self.response_threshold = -1  # TODO
+        # 可调整参数
+        self.response_threshold = 0.15  # 小于目标maxres的这个比例就认为是丢失目标
         self.scale_factor = 0.05  # 调整方框大小每帧的变化率
         # 下列参数来自源代码https://github.com/scott89/KCF/blob/master/run_tracker.m
         self.padding = 2.5  # 扩大ROI的倍数，帮助模型获取目标周围环境信息
         self.kernel_sigma = 0.5  # 默认 0.5
         self.kernel_lambda_ = 1e-4  # 正则化参数 默认1e-4
         self.sigma_factor = 0.1  # 相对于目标大小的回归目标的空间带宽 默认0.1
-        self.interp_factor = 0.02  # 更新率，更新alpha和x的速度 默认0.02
+        self.interp_factor = 0.005  # 更新率，更新alpha和x的速度 默认0.02
 
         # HOG参数
         self._win_size = None
@@ -36,6 +36,7 @@ class Tracker:
         self.n_bins = 9
 
         # 不可调整参数
+        self.target_maxres = None  # 最大的参数
         self.roi = None  # 存储的是未经缩放的roi
         self._hog_win_size = None  # 存储缩放为 maxpatchsize 的 窗口大小，提取特征的大小
         pass
@@ -69,6 +70,12 @@ class Tracker:
 
         # 6. 计算kxx  训练非线性回归器得到alphaf
         self.alphaf = self._train(x, y)
+
+        # %. 计算原始图像区域的最大响应
+        response = self._detect(self.alphaf, x, x)
+        self.target_maxres = np.max(response)
+        print(self.target_maxres)
+        print("-" * 10)
 
         self.roi = roi  # 模型当前的roi
         self.x = x  # 目标区域的特征图
@@ -115,8 +122,7 @@ class Tracker:
                 roi_updated = (x + dux, y + duy, w, h)
                 z_template = z
 
-        # 4. 更新模型和信息
-        # 更新roi信息
+        # 4. 更新模型和信息，前提是根据判定确认追踪成功，否则认为目标lost
         self.roi = roi_updated
         # 通过插值法更新目标区域模板
         self.x = self.x * (1 - self.interp_factor) + z_template * self.interp_factor
@@ -126,8 +132,22 @@ class Tracker:
         self.alphaf = (
             self.alphaf * (1 - self.interp_factor) + alphaf * self.interp_factor
         )
-        success = True
-        return success, self.roi
+        if max_record > self.target_maxres * self.response_threshold:
+            print(max_record)
+            # 更新roi信息
+            # self.roi = roi_updated
+            # # 通过插值法更新目标区域模板
+            # self.x = self.x * (1 - self.interp_factor) + z_template * self.interp_factor
+            # # 通过插值法更新模型
+            # y = self._gen_label(z_template.shape[1:])
+            # alphaf = self._train(z_template, y)
+            # self.alphaf = (
+            #     self.alphaf * (1 - self.interp_factor) + alphaf * self.interp_factor
+            # )
+            return True, self.roi
+        else:
+            print(max_record, " Lost")
+            return False, None
 
     def _gen_feature(self, image, roi):
         """计算目标区域的HOG特征

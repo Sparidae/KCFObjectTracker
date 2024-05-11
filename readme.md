@@ -6,10 +6,14 @@
 ## 文件结构
 
 ```text
-OTB100/
-    xxx/
-    ...
-main.py
+dataset/
+    OTB100/ # OTB数据集，由视频的图片序列组成
+        xxx/
+        ...
+    video.avi # 视频文件数据
+
+tracker.py # KCF实现
+main.py # 主要实验
 ```
 
 
@@ -17,7 +21,7 @@ main.py
 
 1. 测试数据集
 2. 读取数据：
-    - 数据集读取：img+rect文本
+    - 数据集读取：img序列+rect文本
     - 视频文件：video.xxx
     - 实时视频：cv读取视频设备画面
 
