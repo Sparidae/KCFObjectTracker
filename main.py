@@ -156,7 +156,12 @@ class TrackingTrial:
                     # 展示第一帧
                 elif self.video_type == "camera":
                     # TODO 按键来停下视频一帧并框选图像，否则一直循环
-                    roi = cv2.selectROI("Tracking", frame, False, False)
+                    self.interval = 1
+                    if cv2.waitKey(self.interval) & 0xFF == ord("c"):
+                        roi = cv2.selectROI("Tracking", frame, False, False)
+                        tracker.init(frame, roi)
+                        status = 1  # 更改为跟踪状态
+
             elif status == 1:
                 success, bbox = tracker.update(frame)  # 是否成功和边界框
                 if not success:
@@ -197,10 +202,13 @@ if __name__ == "__main__":
     p = TrackingTrial()
     # cap = p.read_camera()
 
-    # cap, rects = p.read_seq()
-    # # p.show_ground_truth(cap, rects)
-    # # p.track_object(cap, rects, True)  # opencv方法
-    # p.track_object(cap, rects)
+    cap, rects = p.read_seq()
+    # p.show_ground_truth(cap, rects)
+    # p.track_object(cap, rects, True)  # opencv方法
+    p.track_object(cap, rects)
 
-    cap = p.read_video(video_path="./dataset/car.avi")
-    p.track_object(cap)
+    # cap = p.read_video(video_path="./dataset/car.avi")
+    # p.track_object(cap)
+
+    # cap = p.read_camera()
+    # p.track_object(cap)

@@ -159,7 +159,6 @@ class Tracker:
         # plt.imshow(patch)
         # plt.colorbar()
         # plt.show()
-        # patch = cv2.copyMakeBorder(patch)
         patch = cv2.resize(patch, self._hog_win_size)
 
         # 3. 计算特征，返回值为36,h,w 因为fft2默认计算最后两维
@@ -196,7 +195,7 @@ class Tracker:
         # 参考matlab源码得到计算sigma的公式
         # https://github.com/scott89/KCF/blob/master/gaussian_shaped_labels.m
         # https://github.com/scott89/KCF/blob/master/tracker.m
-        sigma = np.sqrt(w * h) * self.sigma_factor / self.padding
+        sigma = np.sqrt(w * h) * self.sigma_factor / self.cell_size[0]
         g = 1 / (2 * np.pi * sigma**2) * np.exp(-(x**2 + y**2) / (2 * sigma**2))
         return g
 
