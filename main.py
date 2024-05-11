@@ -14,7 +14,7 @@ GREEN = (0, 255, 0)
 
 class TrackingTrial:
     def __init__(self) -> None:
-        self.interval = 15  # 等待时间间隔
+        self.interval = 0  # 等待时间间隔
         self.gt = True  # 是否绘制groundtruth
         self.video_type = None  # ['seq','video','camera']
 
@@ -121,9 +121,9 @@ class TrackingTrial:
             param.sigma = 0.2  # 较大的值会使跟踪器对目标形状的变化更加不敏感
             param.lambda_ = 0.0001  # 较大的值会使跟踪器对目标形状的变化更加不敏感
             param.interp_factor = 0.075  # 0.075 调整这个值来快速适应
-            param.output_sigma_factor = 1 / 16  # 1/16 提高检测大小的适应性，
+            param.output_sigma_factor = 0.1  # 1/16 提高检测大小的适应性，
             param.resize = True
-            # param.max_patch_size = 300 # 80
+            param.max_patch_size = 256  # 80
             tracker = cv2.TrackerKCF.create(parameters=param)
         else:
             # TODO 自己实现的KCF
@@ -192,6 +192,7 @@ class TrackingTrial:
 if __name__ == "__main__":
     p = TrackingTrial()
     # cap = p.read_camera()
+
     cap, rects = p.read_seq()
     # p.show_ground_truth(cap, rects)
     # p.track_object(cap, rects, True)  # opencv方法

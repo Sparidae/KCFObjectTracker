@@ -1,6 +1,7 @@
 import os
 
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 
 """
@@ -14,13 +15,6 @@ mw,mh 是用于提取特征的窗口大小
 
 class Tracker:
     def __init__(self) -> None:
-        # HOG参数
-        self._win_size = None
-        self.block_size = (8, 8)
-        self.block_stride = (4, 4)
-        self.cell_size = (4, 4)
-        self.n_bins = 9
-
         # 将ROI放缩到这个大小再提取HOG特征
         self.max_patch_size = 256
 
@@ -32,6 +26,13 @@ class Tracker:
         self.kernel_lambda_ = 1e-4  # 正则化参数 默认1e-4
         self.sigma_factor = 0.1  # 相对于目标大小的回归目标的空间带宽 默认0.1
         self.interp_factor = 0.02  # 更新率，更新alpha和x的速度 默认0.02
+
+        # HOG参数
+        self._win_size = None
+        self.block_size = (8, 8)
+        self.block_stride = (4, 4)
+        self.cell_size = (4, 4)
+        self.n_bins = 9
 
         # 不可调整参数
         self.roi = None  # 存储的是未经缩放的roi
@@ -65,7 +66,7 @@ class Tracker:
         # 5. 使用二维高斯函数生成训练标签矩阵y
         y = self._gen_label(x.shape[1:])  # y 的形状为h,w
 
-        # 6. 计算kxx  训练非线性回归器得到alphah
+        # 6. 计算kxx  训练非线性回归器得到alphaf
         self.alphaf = self._train(x, y)
 
         self.roi = roi  # 模型当前的roi
@@ -81,6 +82,9 @@ class Tracker:
 
         # 2.计算得到特征响应矩阵 返回形状为fh,fw
         responses = self._detect(self.alphaf, self.x, z)
+        # plt.imshow(responses)
+        # plt.colorbar()
+        # plt.show()
 
         # 3.找到最大响应值和对应的坐标，该坐标是新的roi的中心坐标
         # （设置阈值，如果小于阈值认为目标丢失重新查找）
@@ -88,8 +92,8 @@ class Tracker:
         max_res = np.max(responses)
         y_maxres, x_maxres = np.unravel_index(np.argmax(responses), responses.shape)
         # 相对于中心坐标的偏移
-        dux = int(x_maxres * self.scale_ufw - (ux + uw // 2))  # 减去中心坐标
-        duy = int(y_maxres * self.scale_ufh - (uy + uh // 2))
+        dux = int(x_maxres * self.scale_ufw - (uw // 2))  # 减去中心坐标
+        duy = int(y_maxres * self.scale_ufh - (uh // 2))
 
         # 4. 更新模型和信息
         # 更新roi信息
@@ -123,11 +127,20 @@ class Tracker:
 
         # 2. 裁剪+resize
         # 裁剪出2.5倍ROI的区域，并将这个图片resize到之前计算的hog win size，用于计算特征
-
+        lx, rx = ux, ux + uw
+        ly, ry = uy, uy + uh
+        imh, imw = image.shape[:2]
+        lx_pad = 0 if lx > 0 else 0 - lx
+        ly_pad = 0 if ly > 0 else 0 - ly
+        rx_pad = 0 if rx < imw else rx - imw
+        ry_pad = 0 if ry < imh else ry - imh
         patch = image[uy if uy > 0 else 0 : uy + uh, ux if ux > 0 else 0 : ux + uw, :]
+        patch = np.pad(patch, ((ly_pad, ry_pad), (lx_pad, rx_pad), (0, 0)), mode="edge")
+        # plt.imshow(patch)
+        # plt.colorbar()
+        # plt.show()
         # patch = cv2.copyMakeBorder(patch)
         patch = cv2.resize(patch, self._hog_win_size)
-        # FIXME 如果在图像边缘截取到图片缺失，则resize可能会拉伸图片,这种情况很常见
 
         # 3. 计算特征，返回值为36,h,w 因为fft2默认计算最后两维
         feature = self.hog.compute(patch, self._hog_win_size, padding=(0, 0))
@@ -137,8 +150,8 @@ class Tracker:
         feat_h = mh // self.block_stride[1] - _o
         feature = feature.reshape(feat_w, feat_h, 36).transpose(2, 1, 0)
         # 计算 扩大roi比特征图大的倍数
-        self.scale_ufw = w / feat_w
-        self.scale_ufh = h / feat_h
+        self.scale_ufw = uw / feat_w
+        self.scale_ufh = uh / feat_h
 
         # 4. 针对特征信号通过hanning窗进行平滑处理，减少泄漏
         hann2d = np.hanning(feat_h).reshape(-1, 1) * np.hanning(feat_w)
@@ -163,7 +176,7 @@ class Tracker:
         # 参考matlab源码得到计算sigma的公式
         # https://github.com/scott89/KCF/blob/master/gaussian_shaped_labels.m
         # https://github.com/scott89/KCF/blob/master/tracker.m
-        sigma = np.sqrt(w * h) * self.sigma_factor / self.cell_size[0]
+        sigma = np.sqrt(w * h) * self.sigma_factor / self.padding
         g = 1 / (2 * np.pi * sigma**2) * np.exp(-(x**2 + y**2) / (2 * sigma**2))
         return g
 
@@ -210,7 +223,7 @@ class Tracker:
         Returns:
             _type_: 形状为fh,fw的特征响应矩阵
         """
-        k = self._rbf_kernel_correlation(z, x)
+        k = self._rbf_kernel_correlation(x, z)
         responses = np.real(np.fft.ifft2(alphaf * np.fft.fft2(k)))  # 逆变换后仍然是复数
         return responses  # 形状fh,fw
 
