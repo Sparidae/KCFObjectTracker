@@ -20,6 +20,7 @@ class Tracker:
 
         #
         self.response_threshold = -1  # TODO
+        self.scale_factor = 0.05  # 调整方框大小每帧的变化率
         # 下列参数来自源代码https://github.com/scott89/KCF/blob/master/run_tracker.m
         self.padding = 2.5  # 扩大ROI的倍数，帮助模型获取目标周围环境信息
         self.kernel_sigma = 0.5  # 默认 0.5
@@ -47,8 +48,8 @@ class Tracker:
         # 2. 计算等比例的将ROI最长边缩放到maxpatchsize的大小，该大小需能被blockstride整除
         _factor = self.max_patch_size / max(w, h)
         self._hog_win_size = (
-            int(w * _factor) // 4 * 4 + 4,
-            int(h * _factor) // 4 * 4 + 4,
+            round(w * _factor) // 4 * 4 + 4,
+            round(h * _factor) // 4 * 4 + 4,
         )
 
         # 3. 初始化HOG特征提取器
@@ -74,35 +75,54 @@ class Tracker:
 
     def update(self, frame):
         # 输入当前帧，输出新的roi。找到之前框定ROI中的最大响应
+        # TODO 变化尺度
+        max_record = -1
+        for scale in [1 - self.scale_factor, 1, 1 + self.scale_factor]:
+            # 0. 放缩roi
+            x, y, w, h = self.roi
+            roi_scaled = tuple(
+                round(i)
+                for i in (
+                    x + w / 2 * (1 - scale),
+                    y + h / 2 * (1 - scale),
+                    w * scale,
+                    h * scale,
+                )
+            )
 
-        # 1.提取候选区域特征z
-        z, uroi = self._gen_feature(frame, self.roi)
-        x, y, w, h = self.roi
-        ux, uy, uw, uh = uroi
+            # 1.提取候选区域特征z
+            z, uroi = self._gen_feature(frame, roi_scaled)
+            ux, uy, uw, uh = uroi
 
-        # 2.计算得到特征响应矩阵 返回形状为fh,fw
-        responses = self._detect(self.alphaf, self.x, z)
-        # plt.imshow(responses)
-        # plt.colorbar()
-        # plt.show()
+            # 2.计算得到特征响应矩阵 返回形状为fh,fw
+            responses = self._detect(self.alphaf, self.x, z)
 
-        # 3.找到最大响应值和对应的坐标，该坐标是新的roi的中心坐标
-        # （设置阈值，如果小于阈值认为目标丢失重新查找）
-        # 最大响应的值和下标
-        max_res = np.max(responses)
-        y_maxres, x_maxres = np.unravel_index(np.argmax(responses), responses.shape)
-        # 相对于中心坐标的偏移
-        dux = int(x_maxres * self.scale_ufw - (uw // 2))  # 减去中心坐标
-        duy = int(y_maxres * self.scale_ufh - (uh // 2))
+            # 3.找到最大响应值和对应的中心坐标，如果是最大响应就更新变量
+            # （设置阈值，如果小于阈值认为目标丢失重新查找）
+            # 最大响应的值和下标
+            max_res = np.max(responses)
+            if max_res > max_record:
+                max_record = max_res
+
+                # 相对于uroi中心坐标的偏移
+                y_maxres, x_maxres = np.unravel_index(
+                    np.argmax(responses), responses.shape
+                )
+                dux = round(x_maxres * self.scale_ufw - (uw // 2))  # 减去中心坐标
+                duy = round(y_maxres * self.scale_ufh - (uh // 2))
+
+                x, y, w, h = roi_scaled
+                roi_updated = (x + dux, y + duy, w, h)
+                z_template = z
 
         # 4. 更新模型和信息
         # 更新roi信息
-        self.roi = (x + dux, y + duy, w, h)
+        self.roi = roi_updated
         # 通过插值法更新目标区域模板
-        self.x = self.x * (1 - self.interp_factor) + z * self.interp_factor
+        self.x = self.x * (1 - self.interp_factor) + z_template * self.interp_factor
         # 通过插值法更新模型
-        y = self._gen_label(z.shape[1:])
-        alphaf = self._train(z, y)
+        y = self._gen_label(z_template.shape[1:])
+        alphaf = self._train(z_template, y)
         self.alphaf = (
             self.alphaf * (1 - self.interp_factor) + alphaf * self.interp_factor
         )
@@ -121,9 +141,9 @@ class Tracker:
         """
         # 1. 计算2.5x扩大的ROI，用于获取目标环境信息
         x, y, w, h = roi
-        ux = int((x - w / 2 * (self.padding - 1)) // 2 * 2)
-        uy = int((y - h / 2 * (self.padding - 1)) // 2 * 2)
-        uw, uh = int(w * self.padding), int(h * self.padding)
+        ux = round((x - w / 2 * (self.padding - 1)) // 2 * 2)
+        uy = round((y - h / 2 * (self.padding - 1)) // 2 * 2)
+        uw, uh = round(w * self.padding), round(h * self.padding)
 
         # 2. 裁剪+resize
         # 裁剪出2.5倍ROI的区域，并将这个图片resize到之前计算的hog win size，用于计算特征

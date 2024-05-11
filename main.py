@@ -14,21 +14,20 @@ GREEN = (0, 255, 0)
 
 class TrackingTrial:
     def __init__(self) -> None:
-        self.interval = 0  # 等待时间间隔
+        self.interval = 5  # 等待时间间隔
         self.gt = True  # 是否绘制groundtruth
         self.video_type = None  # ['seq','video','camera']
 
-    def read_seq(self):
+    def read_seq(self, dataset_path="./dataset/OTB100"):
         # 1.读取图片序列
-        data_path = ".\\OTB100"
         video_dirs = []
-        for entry in os.listdir(data_path):
-            full_path = os.path.join(data_path, entry)
+        for entry in os.listdir(dataset_path):
+            full_path = os.path.join(dataset_path, entry)
             if os.path.isdir(full_path):
                 video_dirs.append(full_path)
 
         video_path = random.choice(video_dirs)
-        video_path = ".\\OTB100\\Lemming"  # 适应性调整
+        # video_path = "./dataset/OTB100/Lemming"  # 适应性调整
         print(video_path)
 
         seq_path = os.path.join(video_path, "img/%04d.jpg")
@@ -149,10 +148,15 @@ class TrackingTrial:
                     tracker.init(frame, roi)
                     status = 1  # 更改为跟踪状态
                     bbox = roi
-                else:
-                    # TODO 手动交互式选择方框
-                    # 按键则开始选择初始方框并初始化，否则一直循环展示图像并等待按键
-                    continue
+                elif self.video_type == "video":
+                    roi = cv2.selectROI("Tracking", frame, False, False)
+                    tracker.init(frame, roi)
+                    status = 1  # 更改为跟踪状态
+                    bbox = roi
+                    # 展示第一帧
+                elif self.video_type == "camera":
+                    # TODO 按键来停下视频一帧并框选图像，否则一直循环
+                    roi = cv2.selectROI("Tracking", frame, False, False)
             elif status == 1:
                 success, bbox = tracker.update(frame)  # 是否成功和边界框
                 if not success:
@@ -193,7 +197,10 @@ if __name__ == "__main__":
     p = TrackingTrial()
     # cap = p.read_camera()
 
-    cap, rects = p.read_seq()
-    # p.show_ground_truth(cap, rects)
-    # p.track_object(cap, rects, True)  # opencv方法
-    p.track_object(cap, rects)
+    # cap, rects = p.read_seq()
+    # # p.show_ground_truth(cap, rects)
+    # # p.track_object(cap, rects, True)  # opencv方法
+    # p.track_object(cap, rects)
+
+    cap = p.read_video(video_path="./dataset/car.avi")
+    p.track_object(cap)
