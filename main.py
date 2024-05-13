@@ -176,7 +176,7 @@ class TrackingTrial:
 
             if success and bbox is not None:  # 如果成功且检测到方框
                 x, y, bw, bh = bbox
-                cv2.rectangle(frame, (x, y), (x + bw, y + bh), BLUE, 1)
+                cv2.rectangle(frame, (x, y), (x + bw, y + bh), GREEN, 3)
             else:
                 # TODO 丢失目标处理，重检测？
                 pass
@@ -236,7 +236,5 @@ if __name__ == "__main__":
         cap = p.read_camera()
         p.track_object(cap)
 
-    # cap = p.read_camera()
-
-    # p.show_ground_truth(cap, rects)
+    # p.show_ground_truth(cap, rects) # 展示给定数据集的groundtruth
     # p.track_object(cap, rects, True)  # opencv方法

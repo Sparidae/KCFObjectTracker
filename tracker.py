@@ -82,7 +82,6 @@ class Tracker:
 
     def update(self, frame):
         # 输入当前帧，输出新的roi。找到之前框定ROI中的最大响应
-        # TODO 变化尺度
         max_record = -1
         for scale in [1 - self.scale_factor, 1, 1 + self.scale_factor]:
             # 0. 放缩roi

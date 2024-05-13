@@ -1,4 +1,5 @@
-dataset/** 
+dataset/**
+!dataset/.gitkeep 
 tracker_benchmark-master/**
 .vscode/**
 **/__pycache__/**
